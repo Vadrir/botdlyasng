@@ -3,6 +3,8 @@ from discord.ext import commands
 from discord import app_commands
 import sqlite3
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,6 +20,24 @@ ROLE_THRESHOLDS = [
     (100, "Легенда"),
 ]
 # ────────────────────────────────────────────────────────────────────────────
+
+# ─── Keep-alive сервер (чтобы Render не усыплял бота) ────────────────────────
+class KeepAlive(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+    def log_message(self, format, *args):
+        pass  # отключаем лишние логи
+
+def run_server():
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), KeepAlive)
+    server.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
+# ─────────────────────────────────────────────────────────────────────────────
 
 intents = discord.Intents.default()
 intents.members = True
@@ -84,7 +104,6 @@ def get_leaderboard(guild_id: int, limit: int = 10):
 
 # ─── Логика ролей ─────────────────────────────────────────────────────────────
 async def update_role(member: discord.Member, total_points: int):
-    """Выдаёт нужную роль по количеству поинтов и снимает старые."""
     target_role_name = ROLE_THRESHOLDS[0][1]
     for threshold, role_name in ROLE_THRESHOLDS:
         if total_points >= threshold:
@@ -94,7 +113,7 @@ async def update_role(member: discord.Member, total_points: int):
     target_role = discord.utils.get(member.guild.roles, name=target_role_name)
 
     if target_role is None:
-        return  # роль не найдена на сервере — пропускаем
+        return
 
     roles_to_remove = [
         r for r in member.roles
@@ -153,7 +172,6 @@ async def points(interaction: discord.Interaction, member: discord.Member = None
     target = member or interaction.user
     total = get_points(interaction.guild_id, target.id)
 
-    # Определяем текущий и следующий ранг
     current_rank = ROLE_THRESHOLDS[0][1]
     next_rank = None
     next_threshold = None
